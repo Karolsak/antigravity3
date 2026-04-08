@@ -86,6 +86,13 @@ class TrainParams:
 
 
 # ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+
+_LB_TO_KG = 0.453592       # pounds to kilograms
+_J_PER_KWH = 3_600_000.0   # joules per kilowatt-hour
+
+# ---------------------------------------------------------------------------
 # Main application
 # ---------------------------------------------------------------------------
 
@@ -147,8 +154,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         """Return dict with all sub-answers a-g for the train problem."""
         tp = self.train
 
-        LB_TO_KG = 0.453592
-        train_kg = tp.train_mass_lb * LB_TO_KG
+        train_kg = tp.train_mass_lb * _LB_TO_KG
 
         # (d) total loaded mass
         m_pass = tp.n_passengers * tp.passenger_kg
@@ -182,7 +188,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         E_elec_up = E_mech_J / tp.eta_up
         E_regen = E_mech_J * tp.eta_down
         E_net_J = E_elec_up - E_regen
-        E_net_kWh = E_net_J / 3_600_000.0
+        E_net_kWh = E_net_J / _J_PER_KWH
 
         return dict(
             train_kg=train_kg,
@@ -842,9 +848,6 @@ class FlywheelEngineeringSuite(tk.Tk):
         self.params.j  = float(self.v_j.get())
         self.params.b  = float(self.v_b.get())
         self._refresh_plots()
-
-    def _read_inputs_silent(self) -> None:
-        self._read_inputs()
 
     def _reset_defaults(self) -> None:
         self.params = FlywheelParams()
