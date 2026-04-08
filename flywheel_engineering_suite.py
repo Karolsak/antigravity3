@@ -85,6 +85,22 @@ class TrainParams:
     eta_down: float = 0.80            # fraction of mechanical to electrical going down
 
 
+@dataclass
+class GeneratorParams:
+    """Nominal and test parameters of the salient-pole synchronous generator."""
+    sn_kva: float = 50.0
+    vll_nom: float = 380.0
+    fn_hz: float = 60.0
+    nn_rpm: float = 1800.0
+    pf_nom: float = 0.82
+    vll_slip: float = 115.0
+    i_max: float = 22.2
+    i_min: float = 11.3
+    rf_ohm_20: float = 0.8
+    if0_a: float = 10.5
+    field_temp_c: float = 120.0
+
+
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
@@ -106,6 +122,7 @@ class FlywheelEngineeringSuite(tk.Tk):
 
         self.params = FlywheelParams()
         self.train = TrainParams()
+        self.gen = GeneratorParams()
 
         self.running = False
         self.t = 0.0
@@ -227,6 +244,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self.tab_ctrl = ttk.Frame(nb)
         self.tab_thermal = ttk.Frame(nb)
         self.tab_harm = ttk.Frame(nb)
+        self.tab_gen = ttk.Frame(nb)
 
         for tab, name in [
             (self.tab_main,    "Main Menu & Inputs"),
@@ -237,6 +255,7 @@ class FlywheelEngineeringSuite(tk.Tk):
             (self.tab_ctrl,    "Speed Controller (PID/Fuzzy)"),
             (self.tab_thermal, "Thermal & Economic"),
             (self.tab_harm,    "Harmonics & Power Quality"),
+            (self.tab_gen,     "Synchronous Generator Study"),
         ]:
             nb.add(tab, text=name)
             tab.rowconfigure(0, weight=1)
@@ -250,6 +269,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self._build_controller_tab()
         self._build_thermal_tab()
         self._build_harmonic_tab()
+        self._build_generator_tab()
 
     # ------------------------------------------------------------------ shared widget helpers
     def _slider_row(self, parent: tk.Widget, text: str, frm: float, to: float,
@@ -838,6 +858,45 @@ class FlywheelEngineeringSuite(tk.Tk):
         NavigationToolbar2Tk(self.harm_canvas, right)
         self._autoscale_canvas(self.harm_fig, self.harm_canvas)
 
+    # ================================================================== TAB 9
+    def _build_generator_tab(self) -> None:
+        pw = ttk.PanedWindow(self.tab_gen, orient="horizontal")
+        pw.grid(row=0, column=0, sticky="nsew")
+
+        left = ttk.Frame(pw)
+        right = ttk.Frame(pw)
+        right.rowconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        pw.add(left, weight=1)
+        pw.add(right, weight=2)
+
+        ttk.Label(left, text="Salient-Pole Synchronous Generator",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=6)
+        self.g_sn = self._slider_row(left, "Nominal apparent power Sn [kVA]", 5, 500, self.gen.sn_kva, fmt=".1f")
+        self.g_vn = self._slider_row(left, "Nominal line voltage VLL,n [V]", 100, 15000, self.gen.vll_nom, fmt=".1f")
+        self.g_pf = self._slider_row(left, "Nominal power factor cos(phi)", 0.1, 1.0, self.gen.pf_nom, fmt=".3f")
+        self.g_vs = self._slider_row(left, "Slip-test line voltage Vs [V]", 20, 1000, self.gen.vll_slip, fmt=".1f")
+        self.g_imax = self._slider_row(left, "Slip-test current Imax [A]", 0.1, 500, self.gen.i_max, fmt=".2f")
+        self.g_imin = self._slider_row(left, "Slip-test current Imin [A]", 0.1, 500, self.gen.i_min, fmt=".2f")
+        self.g_rf = self._slider_row(left, "Field resistance Rf@20C [ohm]", 0.01, 20, self.gen.rf_ohm_20, fmt=".3f")
+        self.g_if0 = self._slider_row(left, "Field current If0 for no-load Vn [A]", 0.1, 50, self.gen.if0_a, fmt=".3f")
+        self.g_tf = self._slider_row(left, "Field temperature [C]", 20, 180, self.gen.field_temp_c, fmt=".1f")
+
+        ttk.Button(left, text="Solve (a), (b), (c) and Validate",
+                   command=self.calc_generator).pack(fill="x", padx=8, pady=8)
+
+        self.g_txt = tk.Text(left, height=16, font=("Consolas", 9), wrap="word")
+        self.g_txt.pack(fill="both", expand=True, padx=8, pady=4)
+
+        self.gen_fig = Figure(dpi=96)
+        self.ax_gen_vec = self.gen_fig.add_subplot(211)
+        self.ax_gen_bar = self.gen_fig.add_subplot(212)
+        self.gen_canvas = FigureCanvasTkAgg(self.gen_fig, master=right)
+        self.gen_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        NavigationToolbar2Tk(self.gen_canvas, right)
+        self._autoscale_canvas(self.gen_fig, self.gen_canvas)
+        self.calc_generator()
+
     # ================================================================== event handlers
 
     # ---- flywheel / main ----
@@ -1213,6 +1272,132 @@ class FlywheelEngineeringSuite(tk.Tk):
         except Exception:
             pass
         self.harm_canvas.draw_idle()
+
+    # ---- synchronous generator ----
+    def calc_generator(self) -> None:
+        g = self.gen
+        g.sn_kva = float(self.g_sn.get())
+        g.vll_nom = float(self.g_vn.get())
+        g.pf_nom = float(self.g_pf.get())
+        g.vll_slip = float(self.g_vs.get())
+        g.i_max = float(self.g_imax.get())
+        g.i_min = float(self.g_imin.get())
+        g.rf_ohm_20 = float(self.g_rf.get())
+        g.if0_a = float(self.g_if0.get())
+        g.field_temp_c = float(self.g_tf.get())
+
+        vph_slip = g.vll_slip / math.sqrt(3)
+        xq = vph_slip / max(g.i_max, 1e-9)
+        xd = vph_slip / max(g.i_min, 1e-9)
+
+        vph_n = g.vll_nom / math.sqrt(3)
+        s_va = g.sn_kva * 1000.0
+        i_n = s_va / (math.sqrt(3) * g.vll_nom)
+        phi = math.acos(max(min(g.pf_nom, 1.0), -1.0))
+        p_w = s_va * g.pf_nom
+        q_var = s_va * math.sin(phi)
+
+        def equations(delta: float) -> tuple[float, float]:
+            k = 3.0 * vph_n / max(xd, 1e-9)
+            c = 3.0 * vph_n * vph_n * (xd - xq) / max(2.0 * xd * xq, 1e-9)
+            e = (p_w - c * math.sin(2.0 * delta)) / max(k * math.sin(delta), 1e-9)
+            q_calc = (3.0 * vph_n * e / max(xd, 1e-9)) * math.cos(delta) \
+                - 3.0 * vph_n * vph_n / max(xd, 1e-9) + c * math.cos(2.0 * delta)
+            return e, q_calc
+
+        deltas = np.linspace(0.03, 1.30, 3000)
+        best_delta = deltas[0]
+        best_err = 1e99
+        best_e = vph_n
+        for d in deltas:
+            e_try, q_try = equations(float(d))
+            if not np.isfinite(e_try) or e_try <= 0:
+                continue
+            err = abs(q_try - q_var)
+            if err < best_err:
+                best_err = err
+                best_delta = float(d)
+                best_e = float(e_try)
+
+        ifn = g.if0_a * (best_e / max(vph_n, 1e-9))
+        alpha_cu = 0.00393
+        rf_t = g.rf_ohm_20 * (1.0 + alpha_cu * (g.field_temp_c - 20.0))
+        vf_t = ifn * rf_t
+
+        p_check = (3.0 * vph_n * best_e / max(xd, 1e-9)) * math.sin(best_delta) + \
+            3.0 * vph_n * vph_n * (xd - xq) * math.sin(2.0 * best_delta) / max(2.0 * xd * xq, 1e-9)
+        q_check = (3.0 * vph_n * best_e / max(xd, 1e-9)) * math.cos(best_delta) - \
+            3.0 * vph_n * vph_n / max(xd, 1e-9) + \
+            3.0 * vph_n * vph_n * (xd - xq) * math.cos(2.0 * best_delta) / max(2.0 * xd * xq, 1e-9)
+        s_check = math.sqrt(max(p_check * p_check + q_check * q_check, 0.0))
+
+        txt = (
+            "Given: Sn={:.2f} kVA, VLL,n={:.1f} V, cos(phi)n={:.3f}\n"
+            "Slip test: Vs={:.1f} V, Imax={:.2f} A, Imin={:.2f} A\n\n"
+            "(a) Synchronous reactances (neglecting stator resistance)\n"
+            "    Vs,ph = Vs/sqrt(3) = {:.3f} V\n"
+            "    Xq = Vs,ph/Imax = {:.3f} ohm\n"
+            "    Xd = Vs,ph/Imin = {:.3f} ohm\n"
+            "    Check salient-pole expectation: Xd > Xq -> {}\n\n"
+            "(b) Nominal field current Ifn (two-reaction model)\n"
+            "    Rated current In = Sn/(sqrt(3)VLL) = {:.3f} A\n"
+            "    phi = acos(cos(phi)) = {:.2f} deg\n"
+            "    Solved load angle delta = {:.2f} deg\n"
+            "    Internal emf E = {:.3f} V (phase)\n"
+            "    Linear OCC: If ~ E, so Ifn = If0 * E/Vph,n = {:.3f} A\n\n"
+            "(c) Field terminal voltage at {:.1f} C\n"
+            "    Rf(T) = Rf20*(1 + alpha*(T-20)), alpha=0.00393/C\n"
+            "    Rf(T) = {:.4f} ohm\n"
+            "    Vf = Ifn*Rf(T) = {:.3f} V\n\n"
+            "Model validation at rated point:\n"
+            "    P_calc={:.2f} kW (target {:.2f} kW)\n"
+            "    Q_calc={:.2f} kVAr (target {:.2f} kVAr)\n"
+            "    S_calc={:.2f} kVA (target {:.2f} kVA)\n"
+            "    Relative P error={:.3f}%, Q error={:.3f}%"
+        ).format(
+            g.sn_kva, g.vll_nom, g.pf_nom,
+            g.vll_slip, g.i_max, g.i_min,
+            vph_slip, xq, xd, "YES" if xd > xq else "NO",
+            i_n, math.degrees(phi), math.degrees(best_delta), best_e, ifn,
+            g.field_temp_c, rf_t, vf_t,
+            p_check / 1000.0, p_w / 1000.0,
+            q_check / 1000.0, q_var / 1000.0,
+            s_check / 1000.0, s_va / 1000.0,
+            100.0 * (p_check - p_w) / max(abs(p_w), 1e-9),
+            100.0 * (q_check - q_var) / max(abs(q_var), 1e-9),
+        )
+        self.g_txt.delete("1.0", "end")
+        self.g_txt.insert("1.0", txt)
+
+        self.ax_gen_vec.clear()
+        v = np.array([vph_n, 0.0])
+        i = i_n * np.array([math.cos(-phi), math.sin(-phi)])
+        jxqi = xq * np.array([-i[1], i[0]])
+        self.ax_gen_vec.arrow(0, 0, v[0], v[1], width=0.3, head_width=6, color="#4C72B0", length_includes_head=True)
+        self.ax_gen_vec.arrow(0, 0, i[0] * 10, i[1] * 10, width=0.2, head_width=5, color="#55A868", length_includes_head=True)
+        self.ax_gen_vec.arrow(v[0], v[1], jxqi[0], jxqi[1], width=0.2, head_width=5, color="#C44E52", length_includes_head=True)
+        self.ax_gen_vec.arrow(0, 0, best_e * math.cos(best_delta), best_e * math.sin(best_delta),
+                              width=0.3, head_width=6, color="#DD8452", length_includes_head=True)
+        self.ax_gen_vec.set_title("Phasor Sketch (approx.): V, I, jXqI and internal E")
+        self.ax_gen_vec.set_aspect("equal", adjustable="datalim")
+        self.ax_gen_vec.grid(True, alpha=0.3)
+        self.ax_gen_vec.set_xlabel("Real axis")
+        self.ax_gen_vec.set_ylabel("Imag axis")
+
+        self.ax_gen_bar.clear()
+        labels = ["Xd", "Xq", "If0", "Ifn", "Vf@T"]
+        vals = [xd, xq, g.if0_a, ifn, vf_t]
+        self.ax_gen_bar.bar(labels, vals, color=["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#CCB974"])
+        for idx, val in enumerate(vals):
+            self.ax_gen_bar.text(idx, val + 0.02 * max(vals), "{:.3f}".format(val), ha="center", fontsize=8)
+        self.ax_gen_bar.set_title("Computed parameters and excitation demand")
+        self.ax_gen_bar.grid(axis="y", alpha=0.3)
+
+        try:
+            self.gen_fig.tight_layout(pad=1.5)
+        except Exception:
+            pass
+        self.gen_canvas.draw_idle()
 
 
 # ---------------------------------------------------------------------------
