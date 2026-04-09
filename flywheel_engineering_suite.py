@@ -98,6 +98,31 @@ class AlternatorParams:
     occ_knee_scale: float = 1.0
 
 
+@dataclass
+class SalientPoleDesignParams:
+    """Design inputs for the 1500 kVA salient-pole alternator sizing problem."""
+    kva: float = 1500.0
+    rpm: float = 300.0
+    phases: int = 3
+    freq_hz: float = 50.0
+    vll_v: float = 2400.0
+    stator_bore_m: float = 2.2
+    core_length_m: float = 0.4
+    slots_per_pole_per_phase: int = 4
+    conductors_per_slot: int = 4
+    leakage_factor: float = 1.4
+    winding_factor: float = 0.955
+    pole_core_flux_density: float = 1.5
+    winding_depth_m: float = 0.03
+    at_ratio_field_to_armature: float = 2.1
+    space_factor: float = 0.84
+    allowable_dissipation_w_m2: float = 1800.0
+    clearance_m: float = 0.03
+    pole_arc_ratio: float = 0.7
+    field_current_density_a_mm2: float = 3.5
+    assumed_field_current_a: float = 120.0
+
+
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
@@ -120,6 +145,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self.params = FlywheelParams()
         self.train = TrainParams()
         self.gen = AlternatorParams()
+        self.sal = SalientPoleDesignParams()
 
         self.running = False
         self.t = 0.0
@@ -243,6 +269,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self.tab_harm = ttk.Frame(nb)
         self.tab_gen = ttk.Frame(nb)
         self.tab_adv = ttk.Frame(nb)
+        self.tab_sal = ttk.Frame(nb)
 
         for tab, name in [
             (self.tab_main,    "Main Menu & Inputs"),
@@ -255,6 +282,7 @@ class FlywheelEngineeringSuite(tk.Tk):
             (self.tab_harm,    "Harmonics & Power Quality"),
             (self.tab_gen,     "Alternator Excitation Study"),
             (self.tab_adv,     "Comprehensive Analysis"),
+            (self.tab_sal,     "Salient-Pole Design (1500 kVA)"),
         ]:
             nb.add(tab, text=name)
             tab.rowconfigure(0, weight=1)
@@ -270,6 +298,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self._build_harmonic_tab()
         self._build_generator_tab()
         self._build_advanced_tab()
+        self._build_salient_design_tab()
 
     # ------------------------------------------------------------------ shared widget helpers
     def _slider_row(self, parent: tk.Widget, text: str, frm: float, to: float,
@@ -925,6 +954,61 @@ class FlywheelEngineeringSuite(tk.Tk):
         self._autoscale_canvas(self.adv_fig, self.adv_canvas)
         self.calc_advanced()
 
+    # ================================================================== TAB 11
+    def _build_salient_design_tab(self) -> None:
+        pw = ttk.PanedWindow(self.tab_sal, orient="horizontal")
+        pw.grid(row=0, column=0, sticky="nsew")
+
+        left = ttk.Frame(pw)
+        right = ttk.Frame(pw)
+        right.rowconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        pw.add(left, weight=1)
+        pw.add(right, weight=2)
+
+        ttk.Label(left, text="1500 kVA Salient-Pole Alternator Design Module",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=6)
+        ttk.Label(left, text=(
+            "Includes flux-per-pole sizing, pole geometry, field winding sizing,\n"
+            "thermal check (surface dissipation), and consistency checks."),
+                  justify="left").pack(anchor="w", padx=8, pady=(0, 4))
+
+        s = self.sal
+        self.sal_kva = self._slider_row(left, "Rated apparent power [kVA]", 100, 5000, s.kva, fmt=".0f")
+        self.sal_rpm = self._slider_row(left, "Speed [rpm]", 100, 1500, s.rpm, fmt=".0f")
+        self.sal_f = self._slider_row(left, "Frequency [Hz]", 40, 60, s.freq_hz, fmt=".2f")
+        self.sal_vll = self._slider_row(left, "Line voltage [V]", 380, 15000, s.vll_v, fmt=".0f")
+        self.sal_D = self._slider_row(left, "Stator bore D [m]", 0.5, 5.0, s.stator_bore_m, fmt=".3f")
+        self.sal_L = self._slider_row(left, "Core length L [m]", 0.1, 2.0, s.core_length_m, fmt=".3f")
+        self.sal_q = self._int_slider_row(left, "Slots / pole / phase", 1, 8, s.slots_per_pole_per_phase)
+        self.sal_zs = self._int_slider_row(left, "Conductors / slot", 1, 20, s.conductors_per_slot)
+        self.sal_kl = self._slider_row(left, "Leakage factor", 1.0, 2.2, s.leakage_factor, fmt=".3f")
+        self.sal_kw = self._slider_row(left, "Winding factor kw", 0.6, 1.0, s.winding_factor, fmt=".3f")
+        self.sal_bp = self._slider_row(left, "Pole-core flux density Bp [Wb/m^2]", 0.8, 2.0, s.pole_core_flux_density, fmt=".3f")
+        self.sal_df = self._slider_row(left, "Field winding depth df [m]", 0.01, 0.1, s.winding_depth_m, fmt=".3f")
+        self.sal_ratio = self._slider_row(left, "ATfl / ATa ratio", 1.0, 4.0, s.at_ratio_field_to_armature, fmt=".3f")
+        self.sal_sfc = self._slider_row(left, "Field winding space factor", 0.4, 0.95, s.space_factor, fmt=".3f")
+        self.sal_qf = self._slider_row(left, "Allowable dissipation qf [W/m^2]", 500, 6000, s.allowable_dissipation_w_m2, fmt=".0f")
+        self.sal_clr = self._slider_row(left, "Insulation / flange / shoe clearance [m]", 0.005, 0.08, s.clearance_m, fmt=".3f")
+        self.sal_alpha = self._slider_row(left, "Pole-arc ratio alpha = bp/tau", 0.5, 0.9, s.pole_arc_ratio, fmt=".3f")
+        self.sal_Jf = self._slider_row(left, "Field current density Jf [A/mm^2]", 1.0, 8.0, s.field_current_density_a_mm2, fmt=".3f")
+        self.sal_If = self._slider_row(left, "Assumed field current If [A]", 20, 800, s.assumed_field_current_a, fmt=".1f")
+
+        ttk.Button(left, text="Solve Salient-Pole Design",
+                   command=self.calc_salient_design).pack(fill="x", padx=8, pady=8)
+
+        self.sal_txt = tk.Text(left, height=17, font=("Consolas", 9), wrap="word")
+        self.sal_txt.pack(fill="both", expand=True, padx=8, pady=4)
+
+        self.sal_fig = Figure(dpi=96)
+        self.ax_sal_geom = self.sal_fig.add_subplot(211)
+        self.ax_sal_therm = self.sal_fig.add_subplot(212)
+        self.sal_canvas = FigureCanvasTkAgg(self.sal_fig, master=right)
+        self.sal_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        NavigationToolbar2Tk(self.sal_canvas, right)
+        self._autoscale_canvas(self.sal_fig, self.sal_canvas)
+        self.calc_salient_design()
+
     # ================================================================== event handlers
 
     # ---- flywheel / main ----
@@ -1482,6 +1566,133 @@ class FlywheelEngineeringSuite(tk.Tk):
         except Exception:
             pass
         self.adv_canvas.draw_idle()
+
+    # ---- salient-pole design module ----
+    def calc_salient_design(self) -> None:
+        s = self.sal
+        s.kva = float(self.sal_kva.get())
+        s.rpm = float(self.sal_rpm.get())
+        s.freq_hz = float(self.sal_f.get())
+        s.vll_v = float(self.sal_vll.get())
+        s.stator_bore_m = float(self.sal_D.get())
+        s.core_length_m = float(self.sal_L.get())
+        s.slots_per_pole_per_phase = int(self.sal_q.get())
+        s.conductors_per_slot = int(self.sal_zs.get())
+        s.leakage_factor = float(self.sal_kl.get())
+        s.winding_factor = float(self.sal_kw.get())
+        s.pole_core_flux_density = float(self.sal_bp.get())
+        s.winding_depth_m = float(self.sal_df.get())
+        s.at_ratio_field_to_armature = float(self.sal_ratio.get())
+        s.space_factor = float(self.sal_sfc.get())
+        s.allowable_dissipation_w_m2 = float(self.sal_qf.get())
+        s.clearance_m = float(self.sal_clr.get())
+        s.pole_arc_ratio = float(self.sal_alpha.get())
+        s.field_current_density_a_mm2 = float(self.sal_Jf.get())
+        s.assumed_field_current_a = float(self.sal_If.get())
+
+        m = max(s.phases, 1)
+        poles = max(int(round(120.0 * s.freq_hz / max(s.rpm, 1e-6))), 2)
+        slots_total = m * poles * max(s.slots_per_pole_per_phase, 1)
+        z_total = slots_total * max(s.conductors_per_slot, 1)
+        turns_per_phase = z_total / (2.0 * m)
+
+        v_phase = s.vll_v / math.sqrt(3.0)
+        phi = v_phase / max(4.44 * s.freq_hz * s.winding_factor * turns_per_phase, 1e-9)
+        area_pole_core = phi / max(s.pole_core_flux_density, 1e-6)
+
+        pole_pitch = math.pi * s.stator_bore_m / poles
+        pole_width = s.pole_arc_ratio * pole_pitch
+        pole_length = area_pole_core / max(pole_width, 1e-6)
+
+        i_line = s.kva * 1000.0 / max(math.sqrt(3.0) * s.vll_v, 1e-9)
+        at_a = s.leakage_factor * z_total * i_line / max(2.0 * poles, 1e-9)
+        at_fl = s.at_ratio_field_to_armature * at_a
+
+        jf_a_m2 = s.field_current_density_a_mm2 * 1e6
+        a_cu_total = at_fl / max(jf_a_m2, 1e-9)
+        winding_height = a_cu_total / max(2.0 * s.space_factor * s.winding_depth_m, 1e-9)
+
+        n_turns = at_fl / max(s.assumed_field_current_a, 1e-9)
+        mlt = 2.0 * (pole_width + pole_length + s.winding_depth_m + winding_height)
+        r_cu = 1.72e-8 * (n_turns * mlt) / max(a_cu_total, 1e-12)
+        p_cu = s.assumed_field_current_a ** 2 * r_cu
+        surf = 2.0 * pole_length * winding_height
+        p_allow = s.allowable_dissipation_w_m2 * surf
+
+        pole_height = winding_height + s.winding_depth_m + s.clearance_m
+
+        warn = []
+        if p_cu > p_allow:
+            warn.append("Thermal limit exceeded at selected field current.")
+        if pole_width > pole_pitch:
+            warn.append("Pole width exceeds pole pitch (reduce pole-arc ratio).")
+        if winding_height <= 0 or pole_length <= 0:
+            warn.append("Non-physical geometry; check slider inputs.")
+
+        out = (
+            "SALIENT-POLE ALTERNATOR SIZING (1500 kVA baseline)\n"
+            "--------------------------------------------------\n"
+            "Computed poles P = 120*f/N = {:.0f}\n"
+            "Total stator slots S = m*P*q = {:d}\n"
+            "Total conductors Z = S*z_slot = {:d}\n"
+            "Turns/phase Tph = Z/(2m) = {:.2f}\n\n"
+            "1) Flux per pole:\n"
+            "   Phi = Vph / (4.44*f*kw*Tph) = {:.6f} Wb\n\n"
+            "2) Pole dimensions:\n"
+            "   Pole pitch tau = pi*D/P = {:.4f} m\n"
+            "   Pole width bp = alpha*tau = {:.4f} m\n"
+            "   Pole core area Ap = Phi/Bp = {:.6f} m^2\n"
+            "   Pole core length lp = Ap/bp = {:.4f} m\n\n"
+            "3) MMF and field winding:\n"
+            "   Line current I = S/(sqrt(3)V) = {:.2f} A\n"
+            "   Armature AT/pole = Cl*Z*I/(2P) = {:.2f} AT\n"
+            "   Full-load field AT = (ATfl/ATa)*ATa = {:.2f} AT\n"
+            "   Copper area estimate Acu = ATfl/Jf = {:.6f} m^2\n"
+            "   Winding height hw = Acu / (2*Sfc*df) = {:.4f} m\n"
+            "   Field turns Nf (at If={:.1f} A) = {:.1f} turns\n\n"
+            "4) Height check:\n"
+            "   Pole height hp = hw + df + clearance = {:.4f} m\n\n"
+            "5) Thermal consistency check:\n"
+            "   Estimated field copper loss Pc = {:.1f} W\n"
+            "   Allowable cooling power qf*As = {:.1f} W\n"
+            "   Status: {}\n"
+        ).format(
+            poles, slots_total, z_total, turns_per_phase,
+            phi,
+            pole_pitch, pole_width, area_pole_core, pole_length,
+            i_line, at_a, at_fl, a_cu_total, winding_height, s.assumed_field_current_a, n_turns,
+            pole_height, p_cu, p_allow,
+            "PASS" if p_cu <= p_allow else "FAIL"
+        )
+        if warn:
+            out += "\nWarnings:\n  - " + "\n  - ".join(warn)
+        else:
+            out += "\nWarnings: none."
+
+        self.sal_txt.delete("1.0", "end")
+        self.sal_txt.insert("1.0", out)
+
+        self.ax_sal_geom.clear()
+        labels = ["Pole pitch tau", "Pole width bp", "Pole length lp", "Winding height hw", "Pole height hp"]
+        vals = [pole_pitch, pole_width, pole_length, winding_height, pole_height]
+        self.ax_sal_geom.bar(labels, vals, color=["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#DD8452"])
+        self.ax_sal_geom.set_ylabel("Length [m]")
+        self.ax_sal_geom.set_title("Computed Magnetic and Geometric Dimensions")
+        self.ax_sal_geom.grid(axis="y", alpha=0.3)
+
+        self.ax_sal_therm.clear()
+        therm_lbl = ["Estimated Pc", "Allowable qf*As"]
+        therm_vals = [max(p_cu, 0.0), max(p_allow, 0.0)]
+        self.ax_sal_therm.bar(therm_lbl, therm_vals, color=["#C44E52", "#55A868"])
+        self.ax_sal_therm.set_ylabel("Power [W]")
+        self.ax_sal_therm.set_title("Field Winding Thermal Check")
+        self.ax_sal_therm.grid(axis="y", alpha=0.3)
+
+        try:
+            self.sal_fig.tight_layout(pad=1.5)
+        except Exception:
+            pass
+        self.sal_canvas.draw_idle()
 
 
 # ---------------------------------------------------------------------------
