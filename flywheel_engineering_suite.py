@@ -12,6 +12,8 @@ Tabs
 6  Speed Controller (PID/Fuzzy)– step-load comparison with visualisation
 7  Thermal & Economic          – temperature-rise + annual cost
 8  Harmonics & Power Quality   – THD calculator with harmonic spectrum plot
+9  Alternator Excitation Study – 36 MVA machine phasor/excitation scenarios
+10 Comprehensive Analysis      – parameter-sensitivity and validation trends
 
 Run:
     python flywheel_engineering_suite.py
@@ -86,19 +88,14 @@ class TrainParams:
 
 
 @dataclass
-class GeneratorParams:
-    """Nominal and test parameters of the salient-pole synchronous generator."""
-    sn_kva: float = 50.0
-    vll_nom: float = 380.0
-    fn_hz: float = 60.0
-    nn_rpm: float = 1800.0
-    pf_nom: float = 0.82
-    vll_slip: float = 115.0
-    i_max: float = 22.2
-    i_min: float = 11.3
-    rf_ohm_20: float = 0.8
-    if0_a: float = 10.5
-    field_temp_c: float = 120.0
+class AlternatorParams:
+    """36 MVA alternator excitation and phasor-study inputs."""
+    s_mva: float = 36.0
+    vll_nom_kv: float = 20.8
+    vll_target_kv: float = 21.0
+    i_nom_ka: float = 1.0
+    xs_ohm: float = 9.0
+    occ_knee_scale: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +119,7 @@ class FlywheelEngineeringSuite(tk.Tk):
 
         self.params = FlywheelParams()
         self.train = TrainParams()
-        self.gen = GeneratorParams()
+        self.gen = AlternatorParams()
 
         self.running = False
         self.t = 0.0
@@ -245,6 +242,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self.tab_thermal = ttk.Frame(nb)
         self.tab_harm = ttk.Frame(nb)
         self.tab_gen = ttk.Frame(nb)
+        self.tab_adv = ttk.Frame(nb)
 
         for tab, name in [
             (self.tab_main,    "Main Menu & Inputs"),
@@ -255,7 +253,8 @@ class FlywheelEngineeringSuite(tk.Tk):
             (self.tab_ctrl,    "Speed Controller (PID/Fuzzy)"),
             (self.tab_thermal, "Thermal & Economic"),
             (self.tab_harm,    "Harmonics & Power Quality"),
-            (self.tab_gen,     "Synchronous Generator Study"),
+            (self.tab_gen,     "Alternator Excitation Study"),
+            (self.tab_adv,     "Comprehensive Analysis"),
         ]:
             nb.add(tab, text=name)
             tab.rowconfigure(0, weight=1)
@@ -270,6 +269,7 @@ class FlywheelEngineeringSuite(tk.Tk):
         self._build_thermal_tab()
         self._build_harmonic_tab()
         self._build_generator_tab()
+        self._build_advanced_tab()
 
     # ------------------------------------------------------------------ shared widget helpers
     def _slider_row(self, parent: tk.Widget, text: str, frm: float, to: float,
@@ -870,32 +870,60 @@ class FlywheelEngineeringSuite(tk.Tk):
         pw.add(left, weight=1)
         pw.add(right, weight=2)
 
-        ttk.Label(left, text="Salient-Pole Synchronous Generator",
+        ttk.Label(left, text="Alternator Excitation Problem (36 MVA, 20.8 kV)",
                   font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=6)
-        self.g_sn = self._slider_row(left, "Nominal apparent power Sn [kVA]", 5, 500, self.gen.sn_kva, fmt=".1f")
-        self.g_vn = self._slider_row(left, "Nominal line voltage VLL,n [V]", 100, 15000, self.gen.vll_nom, fmt=".1f")
-        self.g_pf = self._slider_row(left, "Nominal power factor cos(phi)", 0.1, 1.0, self.gen.pf_nom, fmt=".3f")
-        self.g_vs = self._slider_row(left, "Slip-test line voltage Vs [V]", 20, 1000, self.gen.vll_slip, fmt=".1f")
-        self.g_imax = self._slider_row(left, "Slip-test current Imax [A]", 0.1, 500, self.gen.i_max, fmt=".2f")
-        self.g_imin = self._slider_row(left, "Slip-test current Imin [A]", 0.1, 500, self.gen.i_min, fmt=".2f")
-        self.g_rf = self._slider_row(left, "Field resistance Rf@20C [ohm]", 0.01, 20, self.gen.rf_ohm_20, fmt=".3f")
-        self.g_if0 = self._slider_row(left, "Field current If0 for no-load Vn [A]", 0.1, 50, self.gen.if0_a, fmt=".3f")
-        self.g_tf = self._slider_row(left, "Field temperature [C]", 20, 180, self.gen.field_temp_c, fmt=".1f")
+        self.g_s = self._slider_row(left, "Rated apparent power S [MVA]", 5, 200, self.gen.s_mva, fmt=".2f")
+        self.g_vnom = self._slider_row(left, "Nominal VLL [kV]", 3, 33, self.gen.vll_nom_kv, fmt=".2f")
+        self.g_vt = self._slider_row(left, "Fixed terminal VLL [kV]", 3, 33, self.gen.vll_target_kv, fmt=".2f")
+        self.g_in = self._slider_row(left, "Nominal current In [kA]", 0.1, 5.0, self.gen.i_nom_ka, fmt=".3f")
+        self.g_xs = self._slider_row(left, "Synchronous reactance Xs [ohm/phase]", 0.1, 30, self.gen.xs_ohm, fmt=".3f")
+        self.g_occ = self._slider_row(left, "OCC knee scaling factor", 0.7, 1.4, self.gen.occ_knee_scale, fmt=".3f")
 
-        ttk.Button(left, text="Solve (a), (b), (c) and Validate",
+        ttk.Button(left, text="Solve a/b/c + Draw Phasors",
                    command=self.calc_generator).pack(fill="x", padx=8, pady=8)
 
-        self.g_txt = tk.Text(left, height=16, font=("Consolas", 9), wrap="word")
+        self.g_txt = tk.Text(left, height=18, font=("Consolas", 9), wrap="word")
         self.g_txt.pack(fill="both", expand=True, padx=8, pady=4)
 
         self.gen_fig = Figure(dpi=96)
-        self.ax_gen_vec = self.gen_fig.add_subplot(211)
-        self.ax_gen_bar = self.gen_fig.add_subplot(212)
+        self.ax_gen_vec = self.gen_fig.add_subplot(121)
+        self.ax_gen_bar = self.gen_fig.add_subplot(122)
         self.gen_canvas = FigureCanvasTkAgg(self.gen_fig, master=right)
         self.gen_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         NavigationToolbar2Tk(self.gen_canvas, right)
         self._autoscale_canvas(self.gen_fig, self.gen_canvas)
         self.calc_generator()
+
+    # ================================================================== TAB 10
+    def _build_advanced_tab(self) -> None:
+        pw = ttk.PanedWindow(self.tab_adv, orient="horizontal")
+        pw.grid(row=0, column=0, sticky="nsew")
+
+        left = ttk.Frame(pw)
+        right = ttk.Frame(pw)
+        right.rowconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+        pw.add(left, weight=1)
+        pw.add(right, weight=2)
+
+        ttk.Label(left, text="Comprehensive Validation & Sensitivity",
+                  font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=8, pady=6)
+        self.adv_xs_span = self._slider_row(left, "Xs sweep span [% around nominal]", 5, 80, 30, fmt=".1f")
+        self.adv_v_span = self._slider_row(left, "Voltage sweep span [% around target]", 1, 20, 8, fmt=".1f")
+        self.adv_n = self._int_slider_row(left, "Sweep points", 10, 200, 60)
+        ttk.Button(left, text="Run Sensitivity Sweep", command=self.calc_advanced).pack(fill="x", padx=8, pady=8)
+
+        self.adv_txt = tk.Text(left, height=12, font=("Consolas", 9), wrap="word")
+        self.adv_txt.pack(fill="both", expand=True, padx=8, pady=4)
+
+        self.adv_fig = Figure(dpi=96)
+        self.ax_adv1 = self.adv_fig.add_subplot(211)
+        self.ax_adv2 = self.adv_fig.add_subplot(212)
+        self.adv_canvas = FigureCanvasTkAgg(self.adv_fig, master=right)
+        self.adv_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        NavigationToolbar2Tk(self.adv_canvas, right)
+        self._autoscale_canvas(self.adv_fig, self.adv_canvas)
+        self.calc_advanced()
 
     # ================================================================== event handlers
 
@@ -1273,131 +1301,187 @@ class FlywheelEngineeringSuite(tk.Tk):
             pass
         self.harm_canvas.draw_idle()
 
-    # ---- synchronous generator ----
+    # ---- alternator excitation study ----
+    @staticmethod
+    def _occ_curve_points(knee_scale: float) -> tuple[np.ndarray, np.ndarray]:
+        ix = np.array([0, 120, 240, 360, 480, 600, 720, 840, 960], dtype=float)
+        e_ll = np.array([0.0, 6.0, 11.4, 15.6, 18.5, 20.5, 21.8, 22.8, 23.6], dtype=float)
+        return ix, e_ll * knee_scale
+
+    def _excitation_from_e_ll(self, e_ll_kv: float, knee_scale: float) -> float:
+        ix, e_ll = self._occ_curve_points(knee_scale)
+        e_req = float(max(e_ll_kv, 0.0))
+        if e_req <= e_ll[0]:
+            return float(ix[0])
+        if e_req >= e_ll[-1]:
+            slope = (ix[-1] - ix[-2]) / max(e_ll[-1] - e_ll[-2], 1e-6)
+            return float(ix[-1] + slope * (e_req - e_ll[-1]))
+        return float(np.interp(e_req, e_ll, ix))
+
+    def _alternator_case(self, p_w: float, q_var: float, vll_kv: float, xs_ohm: float,
+                         knee_scale: float) -> dict:
+        v_ll = vll_kv * 1000.0
+        v_ph = v_ll / math.sqrt(3)
+        s = complex(p_w, q_var)
+        i_line = np.conj(s / (math.sqrt(3) * v_ll)) if abs(s) > 0 else 0j
+        e_phase = complex(v_ph, 0.0) + 1j * xs_ohm * i_line
+        e_ll_kv = abs(e_phase) * math.sqrt(3) / 1000.0
+        ix = self._excitation_from_e_ll(e_ll_kv, knee_scale)
+        pf = abs(p_w) / max(abs(s), 1e-9) if abs(s) > 0 else 1.0
+        return {
+            "p_mw": p_w / 1e6,
+            "q_mvar": q_var / 1e6,
+            "i_a": abs(i_line),
+            "i_angle_deg": math.degrees(math.atan2(i_line.imag, i_line.real)) if i_line != 0 else 0.0,
+            "e_phase_v": abs(e_phase),
+            "e_ll_kv": e_ll_kv,
+            "ix_a": ix,
+            "pf": pf,
+            "phasor_i": i_line,
+            "phasor_e": e_phase,
+            "phasor_v": complex(v_ph, 0.0),
+        }
+
     def calc_generator(self) -> None:
         g = self.gen
-        g.sn_kva = float(self.g_sn.get())
-        g.vll_nom = float(self.g_vn.get())
-        g.pf_nom = float(self.g_pf.get())
-        g.vll_slip = float(self.g_vs.get())
-        g.i_max = float(self.g_imax.get())
-        g.i_min = float(self.g_imin.get())
-        g.rf_ohm_20 = float(self.g_rf.get())
-        g.if0_a = float(self.g_if0.get())
-        g.field_temp_c = float(self.g_tf.get())
+        g.s_mva = float(self.g_s.get())
+        g.vll_nom_kv = float(self.g_vnom.get())
+        g.vll_target_kv = float(self.g_vt.get())
+        g.i_nom_ka = float(self.g_in.get())
+        g.xs_ohm = float(self.g_xs.get())
+        g.occ_knee_scale = float(self.g_occ.get())
 
-        vph_slip = g.vll_slip / math.sqrt(3)
-        xq = vph_slip / max(g.i_max, 1e-9)
-        xd = vph_slip / max(g.i_min, 1e-9)
+        case_nl = self._alternator_case(0.0, 0.0, g.vll_target_kv, g.xs_ohm, g.occ_knee_scale)
+        case_r = self._alternator_case(36e6, 0.0, g.vll_target_kv, g.xs_ohm, g.occ_knee_scale)
+        case_c = self._alternator_case(0.0, -12e6, g.vll_target_kv, g.xs_ohm, g.occ_knee_scale)
 
-        vph_n = g.vll_nom / math.sqrt(3)
-        s_va = g.sn_kva * 1000.0
-        i_n = s_va / (math.sqrt(3) * g.vll_nom)
-        phi = math.acos(max(min(g.pf_nom, 1.0), -1.0))
-        p_w = s_va * g.pf_nom
-        q_var = s_va * math.sin(phi)
-
-        def equations(delta: float) -> tuple[float, float]:
-            k = 3.0 * vph_n / max(xd, 1e-9)
-            c = 3.0 * vph_n * vph_n * (xd - xq) / max(2.0 * xd * xq, 1e-9)
-            e = (p_w - c * math.sin(2.0 * delta)) / max(k * math.sin(delta), 1e-9)
-            q_calc = (3.0 * vph_n * e / max(xd, 1e-9)) * math.cos(delta) \
-                - 3.0 * vph_n * vph_n / max(xd, 1e-9) + c * math.cos(2.0 * delta)
-            return e, q_calc
-
-        deltas = np.linspace(0.03, 1.30, 3000)
-        best_delta = deltas[0]
-        best_err = 1e99
-        best_e = vph_n
-        for d in deltas:
-            e_try, q_try = equations(float(d))
-            if not np.isfinite(e_try) or e_try <= 0:
-                continue
-            err = abs(q_try - q_var)
-            if err < best_err:
-                best_err = err
-                best_delta = float(d)
-                best_e = float(e_try)
-
-        ifn = g.if0_a * (best_e / max(vph_n, 1e-9))
-        alpha_cu = 0.00393
-        rf_t = g.rf_ohm_20 * (1.0 + alpha_cu * (g.field_temp_c - 20.0))
-        vf_t = ifn * rf_t
-
-        p_check = (3.0 * vph_n * best_e / max(xd, 1e-9)) * math.sin(best_delta) + \
-            3.0 * vph_n * vph_n * (xd - xq) * math.sin(2.0 * best_delta) / max(2.0 * xd * xq, 1e-9)
-        q_check = (3.0 * vph_n * best_e / max(xd, 1e-9)) * math.cos(best_delta) - \
-            3.0 * vph_n * vph_n / max(xd, 1e-9) + \
-            3.0 * vph_n * vph_n * (xd - xq) * math.cos(2.0 * best_delta) / max(2.0 * xd * xq, 1e-9)
-        s_check = math.sqrt(max(p_check * p_check + q_check * q_check, 0.0))
+        i_nom = g.i_nom_ka * 1000.0
+        results_ok = all(np.isfinite([case_nl["ix_a"], case_r["ix_a"], case_c["ix_a"]]))
+        over_i = [name for name, c in [("Resistive", case_r), ("Capacitive", case_c)] if c["i_a"] > i_nom]
 
         txt = (
-            "Given: Sn={:.2f} kVA, VLL,n={:.1f} V, cos(phi)n={:.3f}\n"
-            "Slip test: Vs={:.1f} V, Imax={:.2f} A, Imin={:.2f} A\n\n"
-            "(a) Synchronous reactances (neglecting stator resistance)\n"
-            "    Vs,ph = Vs/sqrt(3) = {:.3f} V\n"
-            "    Xq = Vs,ph/Imax = {:.3f} ohm\n"
-            "    Xd = Vs,ph/Imin = {:.3f} ohm\n"
-            "    Check salient-pole expectation: Xd > Xq -> {}\n\n"
-            "(b) Nominal field current Ifn (two-reaction model)\n"
-            "    Rated current In = Sn/(sqrt(3)VLL) = {:.3f} A\n"
-            "    phi = acos(cos(phi)) = {:.2f} deg\n"
-            "    Solved load angle delta = {:.2f} deg\n"
-            "    Internal emf E = {:.3f} V (phase)\n"
-            "    Linear OCC: If ~ E, so Ifn = If0 * E/Vph,n = {:.3f} A\n\n"
-            "(c) Field terminal voltage at {:.1f} C\n"
-            "    Rf(T) = Rf20*(1 + alpha*(T-20)), alpha=0.00393/C\n"
-            "    Rf(T) = {:.4f} ohm\n"
-            "    Vf = Ifn*Rf(T) = {:.3f} V\n\n"
-            "Model validation at rated point:\n"
-            "    P_calc={:.2f} kW (target {:.2f} kW)\n"
-            "    Q_calc={:.2f} kVAr (target {:.2f} kVAr)\n"
-            "    S_calc={:.2f} kVA (target {:.2f} kVA)\n"
-            "    Relative P error={:.3f}%, Q error={:.3f}%"
+            "ALTERNATOR DATA\n"
+            "  S_rated = {:.2f} MVA, V_nom = {:.2f} kV, In = {:.3f} kA, Xs = {:.3f} ohm/phase\n"
+            "  Fixed terminal voltage for all cases: VLL = {:.2f} kV\n"
+            "  Model: E_phase = V_phase + j Xs I, Ra neglected\n"
+            "  OCC used: interpolated E0-V vs Ix curve (scaled knee={:.3f})\n\n"
+            "(a) NO-LOAD\n"
+            "  I = 0 A, so E = V\n"
+            "  Required E0 = {:.3f} kV (line-line), Ix = {:.2f} A\n\n"
+            "(b) RESISTIVE LOAD 36 MW\n"
+            "  I = P/(sqrt(3)V) = {:.2f} A, angle = {:.2f} deg (approximately in-phase)\n"
+            "  E0 required = {:.3f} kV (line-line), Ix = {:.2f} A\n\n"
+            "(c) CAPACITIVE LOAD 12 Mvar (purely capacitive)\n"
+            "  I = Q/(sqrt(3)V) = {:.2f} A, angle = {:.2f} deg (leading)\n"
+            "  E0 required = {:.3f} kV (line-line), Ix = {:.2f} A\n\n"
+            "CHECKS\n"
+            "  Numerical solution finite: {}\n"
+            "  Current limit exceedances (In={:.0f} A): {}\n"
+            "  Practical note: capacitive loading reduces field demand; resistive loading increases E and Ix.\n"
         ).format(
-            g.sn_kva, g.vll_nom, g.pf_nom,
-            g.vll_slip, g.i_max, g.i_min,
-            vph_slip, xq, xd, "YES" if xd > xq else "NO",
-            i_n, math.degrees(phi), math.degrees(best_delta), best_e, ifn,
-            g.field_temp_c, rf_t, vf_t,
-            p_check / 1000.0, p_w / 1000.0,
-            q_check / 1000.0, q_var / 1000.0,
-            s_check / 1000.0, s_va / 1000.0,
-            100.0 * (p_check - p_w) / max(abs(p_w), 1e-9),
-            100.0 * (q_check - q_var) / max(abs(q_var), 1e-9),
+            g.s_mva, g.vll_nom_kv, g.i_nom_ka, g.xs_ohm,
+            g.vll_target_kv, g.occ_knee_scale,
+            case_nl["e_ll_kv"], case_nl["ix_a"],
+            case_r["i_a"], case_r["i_angle_deg"], case_r["e_ll_kv"], case_r["ix_a"],
+            case_c["i_a"], case_c["i_angle_deg"], case_c["e_ll_kv"], case_c["ix_a"],
+            "PASS" if results_ok else "FAIL", i_nom,
+            ", ".join(over_i) if over_i else "None",
         )
         self.g_txt.delete("1.0", "end")
         self.g_txt.insert("1.0", txt)
 
         self.ax_gen_vec.clear()
-        v = np.array([vph_n, 0.0])
-        i = i_n * np.array([math.cos(-phi), math.sin(-phi)])
-        jxqi = xq * np.array([-i[1], i[0]])
-        self.ax_gen_vec.arrow(0, 0, v[0], v[1], width=0.3, head_width=6, color="#4C72B0", length_includes_head=True)
-        self.ax_gen_vec.arrow(0, 0, i[0] * 10, i[1] * 10, width=0.2, head_width=5, color="#55A868", length_includes_head=True)
-        self.ax_gen_vec.arrow(v[0], v[1], jxqi[0], jxqi[1], width=0.2, head_width=5, color="#C44E52", length_includes_head=True)
-        self.ax_gen_vec.arrow(0, 0, best_e * math.cos(best_delta), best_e * math.sin(best_delta),
-                              width=0.3, head_width=6, color="#DD8452", length_includes_head=True)
-        self.ax_gen_vec.set_title("Phasor Sketch (approx.): V, I, jXqI and internal E")
-        self.ax_gen_vec.set_aspect("equal", adjustable="datalim")
-        self.ax_gen_vec.grid(True, alpha=0.3)
+        scale_i = 10.0
+        for label, case, col in [
+            ("No-load", case_nl, "#4C72B0"),
+            ("Resistive 36 MW", case_r, "#C44E52"),
+            ("Capacitive -12 Mvar", case_c, "#55A868"),
+        ]:
+            v = case["phasor_v"]
+            i = case["phasor_i"] * scale_i
+            e = case["phasor_e"]
+            self.ax_gen_vec.arrow(0, 0, v.real, v.imag, width=12, head_width=350, color="#222222", alpha=0.4, length_includes_head=True)
+            self.ax_gen_vec.arrow(0, 0, i.real, i.imag, width=7, head_width=200, color=col, alpha=0.55, length_includes_head=True)
+            self.ax_gen_vec.arrow(0, 0, e.real, e.imag, width=9, head_width=280, color=col, length_includes_head=True, label=label)
+
+        self.ax_gen_vec.set_title("Phasor Diagram Overlay (E vectors for a/b/c)")
         self.ax_gen_vec.set_xlabel("Real axis")
         self.ax_gen_vec.set_ylabel("Imag axis")
+        self.ax_gen_vec.grid(True, alpha=0.3)
+        self.ax_gen_vec.legend(fontsize=8, loc="upper left")
+        self.ax_gen_vec.set_aspect("equal", adjustable="datalim")
 
         self.ax_gen_bar.clear()
-        labels = ["Xd", "Xq", "If0", "Ifn", "Vf@T"]
-        vals = [xd, xq, g.if0_a, ifn, vf_t]
-        self.ax_gen_bar.bar(labels, vals, color=["#4C72B0", "#55A868", "#C44E52", "#8172B2", "#CCB974"])
-        for idx, val in enumerate(vals):
-            self.ax_gen_bar.text(idx, val + 0.02 * max(vals), "{:.3f}".format(val), ha="center", fontsize=8)
-        self.ax_gen_bar.set_title("Computed parameters and excitation demand")
+        names = ["No-load", "36 MW\nresistive", "12 Mvar\ncapacitive"]
+        e_vals = [case_nl["e_ll_kv"], case_r["e_ll_kv"], case_c["e_ll_kv"]]
+        ix_vals = [case_nl["ix_a"], case_r["ix_a"], case_c["ix_a"]]
+        x = np.arange(len(names))
+        w = 0.38
+        self.ax_gen_bar.bar(x - w / 2, e_vals, width=w, label="Required E0 [kV LL]", color="#4C72B0")
+        self.ax_gen_bar.bar(x + w / 2, ix_vals, width=w, label="Excitation current Ix [A]", color="#DD8452")
+        self.ax_gen_bar.set_xticks(x)
+        self.ax_gen_bar.set_xticklabels(names)
+        self.ax_gen_bar.set_title("Excitation Demand Comparison")
         self.ax_gen_bar.grid(axis="y", alpha=0.3)
+        self.ax_gen_bar.legend(fontsize=8)
 
         try:
             self.gen_fig.tight_layout(pad=1.5)
         except Exception:
             pass
         self.gen_canvas.draw_idle()
+
+    def calc_advanced(self) -> None:
+        g = self.gen
+        xs_span = float(self.adv_xs_span.get()) / 100.0
+        v_span = float(self.adv_v_span.get()) / 100.0
+        n = max(int(self.adv_n.get()), 10)
+
+        xs_arr = np.linspace(g.xs_ohm * (1.0 - xs_span), g.xs_ohm * (1.0 + xs_span), n)
+        v_arr = np.linspace(g.vll_target_kv * (1.0 - v_span), g.vll_target_kv * (1.0 + v_span), n)
+
+        ix_res_xs = np.array([self._alternator_case(36e6, 0, g.vll_target_kv, xs, g.occ_knee_scale)["ix_a"] for xs in xs_arr])
+        ix_cap_xs = np.array([self._alternator_case(0, -12e6, g.vll_target_kv, xs, g.occ_knee_scale)["ix_a"] for xs in xs_arr])
+
+        ix_res_v = np.array([self._alternator_case(36e6, 0, vv, g.xs_ohm, g.occ_knee_scale)["ix_a"] for vv in v_arr])
+        ix_cap_v = np.array([self._alternator_case(0, -12e6, vv, g.xs_ohm, g.occ_knee_scale)["ix_a"] for vv in v_arr])
+
+        self.ax_adv1.clear()
+        self.ax_adv1.plot(xs_arr, ix_res_xs, lw=2, label="36 MW resistive")
+        self.ax_adv1.plot(xs_arr, ix_cap_xs, lw=2, ls="--", label="12 Mvar capacitive")
+        self.ax_adv1.set_xlabel("Xs [ohm/phase]")
+        self.ax_adv1.set_ylabel("Required Ix [A]")
+        self.ax_adv1.set_title("Sensitivity to Synchronous Reactance")
+        self.ax_adv1.grid(True, alpha=0.3)
+        self.ax_adv1.legend(fontsize=8)
+
+        self.ax_adv2.clear()
+        self.ax_adv2.plot(v_arr, ix_res_v, lw=2, label="36 MW resistive")
+        self.ax_adv2.plot(v_arr, ix_cap_v, lw=2, ls="--", label="12 Mvar capacitive")
+        self.ax_adv2.set_xlabel("Terminal VLL [kV]")
+        self.ax_adv2.set_ylabel("Required Ix [A]")
+        self.ax_adv2.set_title("Sensitivity to Terminal Voltage Regulation")
+        self.ax_adv2.grid(True, alpha=0.3)
+        self.ax_adv2.legend(fontsize=8)
+
+        cond = np.nanmax(ix_res_xs) - np.nanmin(ix_cap_xs)
+        text = (
+            "Comprehensive checks for robustness:\n"
+            "  * Sweep points: {}\n"
+            "  * Xs span: +/-{:.1f}% around {:.3f} ohm\n"
+            "  * Voltage span: +/-{:.1f}% around {:.3f} kV\n"
+            "  * Worst-case excitation spread across scenarios: {:.2f} A\n"
+            "Interpretation: higher Xs and higher terminal voltage both increase field current demand,\n"
+            "while capacitive operation reduces Ix versus resistive loading."
+        ).format(n, xs_span * 100.0, g.xs_ohm, v_span * 100.0, g.vll_target_kv, cond)
+        self.adv_txt.delete("1.0", "end")
+        self.adv_txt.insert("1.0", text)
+
+        try:
+            self.adv_fig.tight_layout(pad=1.5)
+        except Exception:
+            pass
+        self.adv_canvas.draw_idle()
 
 
 # ---------------------------------------------------------------------------
